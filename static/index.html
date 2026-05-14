@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PingChecker</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <style>
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --surface2:  #1e2430;
+      --border:    #30363d;
+      --text:      #c9d1d9;
+      --dim:       #8b949e;
+      --accent:    #58a6ff;
+      --green:     #3fb950;
+      --red:       #f85149;
+      --orange:    #d29922;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+
+    /* ---- Header ---- */
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      height: 52px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    header h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.3px; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--dim);
+      font-size: 11px;
+      margin-left: 8px;
+    }
+    .conn-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--dim);
+    }
+
+    /* ---- Layout ---- */
+    .layout {
+      display: grid;
+      grid-template-columns: 270px 1fr;
+      align-items: start;
+      min-height: calc(100vh - 52px);
+    }
+    aside {
+      position: sticky;
+      top: 52px;
+      height: calc(100vh - 52px);
+      overflow-y: auto;
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+    }
+    main {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* ---- Sidebar ---- */
+    .sidebar-inner {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      overflow: hidden;
+    }
+    .sidebar-title {
+      padding: 14px 16px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: var(--dim);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    #host-list {
+      list-style: none;
+      overflow-y: auto;
+      flex: 1;
+      padding: 6px 0;
+    }
+    .host-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      border-radius: 0;
+      transition: background 0.1s;
+    }
+    .host-item:hover { background: var(--surface2); }
+    .host-info { flex: 1; min-width: 0; }
+    .host-label {
+      display: block;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .host-addr {
+      display: block;
+      font-size: 11px;
+      color: var(--dim);
+      font-family: monospace;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .host-ms {
+      font-size: 12px;
+      font-family: monospace;
+      text-align: right;
+      min-width: 54px;
+      flex-shrink: 0;
+    }
+    .host-ms.timeout { color: var(--red); }
+    .host-ms.ok      { color: var(--green); }
+    .btn-remove {
+      background: none;
+      border: none;
+      color: var(--dim);
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      padding: 0 2px;
+      flex-shrink: 0;
+      opacity: 0;
+      transition: opacity 0.15s, color 0.15s;
+    }
+    .host-item:hover .btn-remove { opacity: 1; }
+    .btn-remove:hover { color: var(--red); }
+
+    /* ---- Add host form ---- */
+    .add-form {
+      padding: 12px 14px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .add-form input {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 6px 10px;
+      font-size: 13px;
+      width: 100%;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .add-form input:focus { border-color: var(--accent); }
+    .add-form input::placeholder { color: var(--dim); }
+    .btn-add {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      border-radius: 6px;
+      padding: 7px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      transition: opacity 0.15s;
+    }
+    .btn-add:hover { opacity: 0.85; }
+
+    /* ---- Panels ---- */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .panel-header h2 { font-size: 14px; font-weight: 600; }
+    .panel-body { padding: 16px; }
+
+    /* ---- Charts ---- */
+    .chart-wrap {
+      position: relative;
+      height: 300px;
+      padding: 12px 16px 16px;
+    }
+    .chart-wrap.tall { height: 400px; }
+
+    /* ---- Time range controls ---- */
+    .time-controls {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .range-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--dim);
+      cursor: pointer;
+      font-size: 12px;
+      padding: 3px 10px;
+      transition: background 0.1s, color 0.1s, border-color 0.1s;
+    }
+    .range-btn:hover  { background: var(--surface2); color: var(--text); }
+    .range-btn.active { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 600; }
+    .btn-load, .btn-export {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 12px;
+      padding: 3px 12px;
+      margin-left: 4px;
+      transition: background 0.1s;
+    }
+    .btn-load:hover, .btn-export:hover { background: var(--border); }
+    .btn-export { color: var(--accent); border-color: var(--accent); }
+
+    /* ---- Drops table ---- */
+    .table-wrap {
+      overflow-x: auto;
+      padding: 0 0 4px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th {
+      text-align: left;
+      padding: 8px 16px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--dim);
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 8px 16px;
+      border-bottom: 1px solid rgba(48,54,61,0.5);
+      vertical-align: top;
+    }
+    tr:last-child td { border-bottom: none; }
+    .row-total   td:first-child { border-left: 3px solid var(--red); }
+    .row-partial td:first-child { border-left: 3px solid var(--orange); }
+    .sev-total   { color: var(--red);    font-weight: 600; }
+    .sev-partial { color: var(--orange); font-weight: 600; }
+    .empty-row td { color: var(--dim); text-align: center; padding: 24px; }
+
+    /* ---- Status dots ---- */
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: inline-block;
+    }
+    .dot.up      { background: var(--green); box-shadow: 0 0 5px var(--green); }
+    .dot.down    { background: var(--red);   animation: blink 1s ease-in-out infinite; }
+    .dot.unknown { background: var(--dim); }
+    @keyframes blink { 50% { opacity: 0.25; } }
+
+    /* ---- Misc ---- */
+    .no-data {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--dim);
+      font-size: 13px;
+    }
+    #drop-count { font-size: 11px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;align-items:center">
+    <h1>PingChecker</h1>
+    <span class="badge" id="interval-badge">1 s intervals</span>
+  </div>
+  <div class="conn-pill">
+    <span class="dot unknown" id="conn-dot"></span>
+    <span id="conn-text">Connecting…</span>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <aside>
+    <div class="sidebar-inner">
+      <div class="sidebar-title">Monitored Hosts</div>
+      <ul id="host-list"></ul>
+      <form class="add-form" id="add-form">
+        <input id="add-host-input"  placeholder="IP or hostname" autocomplete="off" required>
+        <input id="add-label-input" placeholder="Label (optional)" autocomplete="off">
+        <button type="submit" class="btn-add">+ Add Host</button>
+      </form>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main>
+    <!-- Live chart -->
+    <div class="panel">
+      <div class="panel-header">
+        <h2>Live Monitor</h2>
+        <span class="badge">Rolling 5 min</span>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="live-chart"></canvas>
+      </div>
+    </div>
+
+    <!-- History chart -->
+    <div class="panel">
+      <div class="panel-header">
+        <h2>History</h2>
+        <div class="time-controls">
+          <button class="range-btn active" data-min="60">1 h</button>
+          <button class="range-btn"        data-min="360">6 h</button>
+          <button class="range-btn"        data-min="1440">24 h</button>
+          <button class="range-btn"        data-min="10080">7 d</button>
+          <button class="btn-load" id="load-btn">Load</button>
+          <button class="btn-export" id="export-history-btn">Export Range</button>
+          <button class="btn-export" id="export-history-all-btn">Export All</button>
+        </div>
+      </div>
+      <div class="chart-wrap tall">
+        <canvas id="hist-chart"></canvas>
+      </div>
+    </div>
+
+    <!-- Drop events -->
+    <div class="panel">
+      <div class="panel-header">
+        <div style="display:flex;align-items:center;gap:10px">
+          <h2>Drop Events <span class="badge" id="drop-count"></span></h2>
+          <button class="btn-export" id="export-drops-btn">Export Range</button>
+          <button class="btn-export" id="export-drops-all-btn">Export All</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Severity</th>
+              <th>Failed Hosts</th>
+              <th>Hosts Down</th>
+            </tr>
+          </thead>
+          <tbody id="drops-body">
+            <tr class="empty-row"><td colspan="4">Load history to see drop events</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Constants & palette
+// ---------------------------------------------------------------------------
+const COLORS = [
+  '#58a6ff','#f85149','#d29922','#3fb950',
+  '#bc8cff','#39d3f5','#f7c948','#ff7b72',
+];
+const LIVE_WINDOW_MS = 5 * 60 * 1000;
+
+function hexRgba(hex, a) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let hosts      = [];          // [{host, label}]
+let hostColors = {};          // host -> color string
+let hostStatus = {};          // host -> {ok, ms}
+let liveData   = {};          // host -> [{x (ms), y (ms|null)}]
+let wsRef      = null;
+let selectedMinutes = 60;
+
+// ---------------------------------------------------------------------------
+// Chart setup  (factory fn — structuredClone can't handle functions)
+// ---------------------------------------------------------------------------
+function makeChartOptions() {
+  return {
+    animation: false,
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { labels: { color: '#8b949e', boxWidth: 12, padding: 16 } },
+      tooltip: {
+        backgroundColor: '#161b22',
+        borderColor: '#30363d',
+        borderWidth: 1,
+        titleColor: '#c9d1d9',
+        bodyColor: '#8b949e',
+        callbacks: {
+          label: ctx => {
+            if (ctx.raw == null || ctx.raw.y == null)
+              return ` ${ctx.dataset.label}: Timeout`;
+            return ` ${ctx.dataset.label}: ${ctx.raw.y.toFixed(1)} ms`;
+          }
+        }
+      }
+    },
+    scales: {
+      x: {
+        type: 'time',
+        time: { displayFormats: { second:'HH:mm:ss', minute:'HH:mm', hour:'HH:mm', day:'MMM d' } },
+        grid:  { color: 'rgba(255,255,255,0.04)' },
+        ticks: { color: '#8b949e', maxRotation: 0 },
+      },
+      y: {
+        beginAtZero: true,
+        grace: '15%',
+        title: { display: true, text: 'ms', color: '#8b949e' },
+        grid:  { color: 'rgba(255,255,255,0.04)' },
+        ticks: { color: '#8b949e' },
+      },
+    },
+  };
+}
+
+const liveChart = new Chart(
+  document.getElementById('live-chart'),
+  { type: 'line', data: { datasets: [] }, options: makeChartOptions() }
+);
+
+const histChart = new Chart(
+  document.getElementById('hist-chart'),
+  { type: 'line', data: { datasets: [] }, options: makeChartOptions() }
+);
+
+// ---------------------------------------------------------------------------
+// WebSocket  (real-time pings only — host list comes from REST)
+// ---------------------------------------------------------------------------
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}/ws`);
+  wsRef = ws;
+
+  ws.onopen = () => {
+    document.getElementById('conn-dot').className   = 'dot up';
+    document.getElementById('conn-text').textContent = 'Connected';
+  };
+
+  ws.onclose = () => {
+    document.getElementById('conn-dot').className   = 'dot down';
+    document.getElementById('conn-text').textContent = 'Reconnecting…';
+    setTimeout(connectWS, 3000);
+  };
+
+  ws.onerror = () => ws.close();
+
+  ws.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    // 'hosts' message ignored — we load via REST; only use WS for live pings
+    if (msg.type === 'ping') onPing(msg.ts, msg.data);
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Host management
+// ---------------------------------------------------------------------------
+async function initHosts(newHosts) {
+  hosts = newHosts;
+  hosts.forEach((h, i) => { hostColors[h.host] = COLORS[i % COLORS.length]; });
+
+  // Pre-fill live window from history
+  for (const h of hosts) liveData[h.host] = [];
+  const now   = Math.floor(Date.now() / 1000);
+  const start = now - Math.floor(LIVE_WINDOW_MS / 1000);
+  const rows  = await fetch(`/api/history?start=${start}&end=${now}`).then(r => r.json());
+  for (const p of rows) {
+    if (liveData[p.host] !== undefined)
+      liveData[p.host].push({ x: p.ts * 1000, y: p.ok ? p.ms : null });
+  }
+
+  updateLiveChart();
+  renderHostList();
+  loadHistory();
+}
+
+function renderHostList() {
+  const ul = document.getElementById('host-list');
+  ul.innerHTML = '';
+  for (const { host, label } of hosts) {
+    const st  = hostStatus[host] || { ok: null, ms: null };
+    const dot = st.ok === null ? 'unknown' : st.ok ? 'up' : 'down';
+    const msText = st.ok === true  ? `${st.ms != null ? st.ms.toFixed(1) : '?'} ms`
+                 : st.ok === false ? 'Timeout'
+                 : '—';
+    const msClass = st.ok === true ? 'ok' : st.ok === false ? 'timeout' : '';
+
+    const li = document.createElement('li');
+    li.className = 'host-item';
+    li.innerHTML = `
+      <span class="dot ${dot}" style="background:${hostColors[host]};box-shadow:none"></span>
+      <div class="host-info">
+        <span class="host-label">${esc(label)}</span>
+        <span class="host-addr">${esc(host)}</span>
+      </div>
+      <span class="host-ms ${msClass}">${msText}</span>
+      <button class="btn-remove" title="Remove" data-host="${esc(host)}">×</button>
+    `;
+    ul.appendChild(li);
+  }
+  // Show "No hosts" placeholder
+  if (hosts.length === 0) {
+    ul.innerHTML = '<li style="padding:20px 16px;color:var(--dim);font-size:13px">No hosts — add one below</li>';
+  }
+}
+
+document.getElementById('host-list').addEventListener('click', async e => {
+  const btn = e.target.closest('.btn-remove');
+  if (!btn) return;
+  const host = btn.dataset.host;
+  await fetch(`/api/hosts/${encodeURIComponent(host)}`, { method: 'DELETE' });
+  hosts = hosts.filter(h => h.host !== host);
+  delete hostColors[host];
+  delete hostStatus[host];
+  delete liveData[host];
+  renderHostList();
+  updateLiveChart();
+});
+
+document.getElementById('add-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const hostVal  = document.getElementById('add-host-input').value.trim();
+  const labelVal = document.getElementById('add-label-input').value.trim();
+  if (!hostVal) return;
+
+  const btn = e.target.querySelector('button[type=submit]');
+  btn.disabled    = true;
+  btn.textContent = 'Adding…';
+
+  try {
+    const res = await fetch('/api/hosts', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ host: hostVal, label: labelVal || hostVal }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.detail || 'Could not add host (already exists?)');
+      return;
+    }
+    const added = await res.json();
+    document.getElementById('add-host-input').value  = '';
+    document.getElementById('add-label-input').value = '';
+
+    if (!hosts.find(h => h.host === added.host)) {
+      hosts.push({ host: added.host, label: added.label });
+      hosts.forEach((h, i) => { hostColors[h.host] = COLORS[i % COLORS.length]; });
+      liveData[added.host] = [];
+    }
+    renderHostList();
+    updateLiveChart();
+  } catch (err) {
+    alert('Cannot reach server — is ping_checker.py running?');
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = '+ Add Host';
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Live chart
+// ---------------------------------------------------------------------------
+function onPing(ts, data) {
+  const x      = ts * 1000;
+  const cutoff = x - LIVE_WINDOW_MS;
+
+  for (const [host, result] of Object.entries(data)) {
+    hostStatus[host] = { ok: result.ok, ms: result.ms };
+    if (!liveData[host]) liveData[host] = [];
+    liveData[host].push({ x, y: result.ok ? result.ms : null });
+    // Trim old data
+    while (liveData[host].length > 0 && liveData[host][0].x < cutoff)
+      liveData[host].shift();
+  }
+
+  renderHostList();
+  updateLiveChart();
+
+  if (Object.values(data).some(r => !r.ok)) refreshDrops();
+}
+
+function updateLiveChart() {
+  const now = Date.now();
+  liveChart.options.scales.x.min = now - LIVE_WINDOW_MS;
+  liveChart.options.scales.x.max = now;
+  liveChart.data.datasets = hosts.map(({ host, label }) => ({
+    label:            label || host,
+    data:             liveData[host] || [],
+    borderColor:      hostColors[host],
+    backgroundColor:  hexRgba(hostColors[host], 0.08),
+    borderWidth:      2,
+    pointRadius:      2,
+    pointHoverRadius: 5,
+    spanGaps:         false,
+    tension:          0.2,
+    fill:             false,
+  }));
+  liveChart.update('none');
+}
+
+// ---------------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------------
+async function refreshDrops() {
+  const now   = Math.floor(Date.now() / 1000);
+  const start = now - selectedMinutes * 60;
+  try {
+    const drops = await fetch(`/api/drops?start=${start}&end=${now}`).then(r => r.json());
+    renderDrops(drops);
+  } catch { /* ignore if server unreachable */ }
+}
+
+async function loadHistory() {
+  const now   = Math.floor(Date.now() / 1000);
+  const start = now - selectedMinutes * 60;
+
+  const [rows, drops] = await Promise.all([
+    fetch(`/api/history?start=${start}&end=${now}`).then(r => r.json()),
+    fetch(`/api/drops?start=${start}&end=${now}`).then(r => r.json()),
+  ]);
+
+  // Group history by host
+  const byHost = {};
+  for (const p of rows) {
+    if (!byHost[p.host]) byHost[p.host] = [];
+    byHost[p.host].push({ x: p.ts * 1000, y: p.ok ? p.ms : null });
+  }
+
+  // Downsample for performance (max 600 pts per host)
+  for (const [h, pts] of Object.entries(byHost))
+    byHost[h] = downsample(pts, 600);
+
+  histChart.data.datasets = Object.entries(byHost).map(([host, pts]) => {
+    const hObj = hosts.find(x => x.host === host);
+    return {
+      label:            hObj?.label || host,
+      data:             pts,
+      borderColor:      hostColors[host] || '#58a6ff',
+      backgroundColor:  hexRgba(hostColors[host] || '#58a6ff', 0.06),
+      borderWidth:      1.5,
+      pointRadius:      1,
+      pointHoverRadius: 4,
+      spanGaps:         false,
+      tension:          0.2,
+      fill:             false,
+    };
+  });
+  histChart.update();
+
+  renderDrops(drops);
+}
+
+function downsample(data, max) {
+  if (data.length <= max) return data;
+  const step = data.length / max;
+  return Array.from({ length: max }, (_, i) => data[Math.floor(i * step)]);
+}
+
+function renderDrops(drops) {
+  document.getElementById('drop-count').textContent =
+    drops.length > 0 ? `${drops.length} event${drops.length > 1 ? 's' : ''}` : '';
+
+  const tbody = document.getElementById('drops-body');
+  if (drops.length === 0) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="4">No drops in this time range</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = '';
+  // Most recent first
+  for (const d of [...drops].reverse()) {
+    const total = d.all_down;
+    const tr = document.createElement('tr');
+    tr.className = total ? 'row-total' : 'row-partial';
+    tr.innerHTML = `
+      <td style="font-family:monospace;font-size:12px;white-space:nowrap">${fmtTime(d.ts)}</td>
+      <td class="${total ? 'sev-total' : 'sev-partial'}">${total ? 'TOTAL' : 'PARTIAL'}</td>
+      <td style="color:var(--dim)">${d.failed.map(esc).join(', ')}</td>
+      <td style="font-family:monospace">${d.failed.length} / ${d.total} hosts</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Time range controls
+// ---------------------------------------------------------------------------
+document.querySelectorAll('.range-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedMinutes = parseInt(btn.dataset.min);
+  });
+});
+
+document.getElementById('load-btn').addEventListener('click', loadHistory);
+
+document.getElementById('export-history-btn').addEventListener('click', () => {
+  const now   = Math.floor(Date.now() / 1000);
+  const start = now - selectedMinutes * 60;
+  window.location.href = `/api/export/history.csv?start=${start}&end=${now}`;
+});
+
+document.getElementById('export-history-all-btn').addEventListener('click', () => {
+  window.location.href = '/api/export/history.csv';
+});
+
+document.getElementById('export-drops-btn').addEventListener('click', () => {
+  const now   = Math.floor(Date.now() / 1000);
+  const start = now - selectedMinutes * 60;
+  window.location.href = `/api/export/drops.csv?start=${start}&end=${now}`;
+});
+
+document.getElementById('export-drops-all-btn').addEventListener('click', () => {
+  window.location.href = '/api/export/drops.csv';
+});
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function fmtTime(ts) {
+  const d = new Date(ts * 1000);
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} `
+       + `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+// ---------------------------------------------------------------------------
+// Boot — load hosts via REST immediately; WS is for live pings only
+// ---------------------------------------------------------------------------
+async function boot() {
+  connectWS();
+  try {
+    const hostList = await fetch('/api/hosts').then(r => r.json());
+    await initHosts(hostList);
+  } catch {
+    document.getElementById('host-list').innerHTML =
+      '<li style="padding:20px 16px;color:var(--red);font-size:13px">' +
+      'Cannot reach server — is ping_checker.py running?</li>';
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

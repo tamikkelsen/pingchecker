@@ -1,0 +1,7 @@
+{
+  "hosts": [
+    {"host": "8.8.8.8",  "label": "Google DNS"},
+    {"host": "1.1.1.1",  "label": "Cloudflare DNS"},
+    {"host": "9.9.9.9",  "label": "Quad9 DNS"}
+  ]
+}

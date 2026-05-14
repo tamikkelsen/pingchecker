@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Database (runtime data — not tracked)
+pings.db
+
+# PyInstaller output
+dist/
+build/
+*.spec.bak
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
