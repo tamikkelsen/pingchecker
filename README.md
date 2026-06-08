@@ -6,6 +6,10 @@ A lightweight, self-hosted network latency monitor with a real-time web dashboar
 
 - **Live chart** — rolling 5-minute latency view updated every second
 - **Historical charts** — 1 h / 6 h / 24 h / 7 d time ranges with automatic downsampling
+- **Per-host stats** — rolling avg / min / max / jitter / packet-loss % in the sidebar
+- **Adjustable settings** — change ping interval, packet size, and timeout live from the UI (no restart)
+- **Pause / resume** — halt and resume monitoring without stopping the server
+- **Drop alerts** — optional desktop notification + sound when a host goes down
 - **Drop events table** — lists every failure with PARTIAL / TOTAL severity
 - **CSV export** — download full or range-filtered history and drop logs
 - **Dynamic host management** — add or remove hosts from the UI without restarting
@@ -69,7 +73,24 @@ Edit `config.json` to set the default hosts loaded on first run. Once the databa
 
 Each entry can be a plain string (IP or hostname) or an object with `host` and an optional `label`.
 
-To change the ping interval, edit `PING_INTERVAL` at the top of `ping_checker.py` (default: `1` second).
+### Monitoring settings
+
+Ping interval, packet size, and timeout are adjustable at runtime from the **⚙ Settings** panel in the web UI and are persisted in the database — no restart required. The **⏸ Pause** button stops and resumes the background ping loop, and **🔔 Alerts** toggles a desktop notification + sound when a host drops.
+
+| Setting | Default | Range | Notes |
+|---------|---------|-------|-------|
+| `interval` | `1` | 1–3600 s | Seconds between ping rounds |
+| `packet_size` | `56` | 0–65500 bytes | ICMP payload size (`0` = OS default) |
+| `timeout_ms` | `2000` | 100–60000 ms | Per-ping timeout |
+
+To override the first-run defaults, add an optional `"settings"` object to `config.json` (used only until values are saved from the UI):
+
+```json
+{
+  "hosts": [ ... ],
+  "settings": { "interval": 2, "packet_size": 120, "timeout_ms": 1500 }
+}
+```
 
 ## Requirements
 
@@ -87,11 +108,13 @@ All listed in `requirements.txt`.
 | `GET` | `/api/hosts` | List all monitored hosts |
 | `POST` | `/api/hosts` | Add a host `{"host": "…", "label": "…"}` |
 | `DELETE` | `/api/hosts/{host}` | Remove a host |
+| `GET` | `/api/settings` | Current monitoring settings |
+| `PUT` | `/api/settings` | Update settings `{"interval": …, "packet_size": …, "timeout_ms": …, "paused": …}` (any subset) |
 | `GET` | `/api/history` | Ping records (`start`, `end`, `host` query params) |
 | `GET` | `/api/drops` | Drop events (`start`, `end` query params) |
 | `GET` | `/api/export/history.csv` | Download history as CSV |
 | `GET` | `/api/export/drops.csv` | Download drop events as CSV |
-| `WS` | `/ws` | WebSocket — streams live ping results |
+| `WS` | `/ws` | WebSocket — streams live ping results and settings changes |
 
 All timestamps are Unix epoch seconds. `start` and `end` default to the last hour when omitted.
 
@@ -102,8 +125,9 @@ Ping results are stored in `pings.db` (SQLite) in the same directory as the scri
 Schema:
 
 ```sql
-hosts (host TEXT PRIMARY KEY, label TEXT, added_at INTEGER)
-pings (id INTEGER, host TEXT, timestamp INTEGER, success INTEGER, latency_ms REAL)
+hosts    (host TEXT PRIMARY KEY, label TEXT, added_at INTEGER)
+pings    (id INTEGER, host TEXT, timestamp INTEGER, success INTEGER, latency_ms REAL)
+settings (key TEXT PRIMARY KEY, value TEXT)
 ```
 
 ## License
