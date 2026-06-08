@@ -6,8 +6,17 @@ __pycache__/
 
 # Database (runtime data — not tracked)
 pings.db
+pings.db-wal
+pings.db-shm
 
-# PyInstaller output
+# Go build output
+/pingchecker
+/pingchecker.exe
+pingchecker-*-amd64
+pingchecker-*-arm64
+pingchecker-*.exe
+
+# PyInstaller / build output
 dist/
 build/
 *.spec.bak

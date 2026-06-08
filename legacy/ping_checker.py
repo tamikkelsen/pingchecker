@@ -38,8 +38,11 @@ if _FROZEN:
     # Writable data (db, config) lives next to the .exe
     BASE = Path(sys.executable).parent
 else:
-    STATIC_DIR = Path(__file__).parent / "static"
-    BASE = Path(__file__).parent
+    # Legacy build: dashboard + data live in the repo root (one dir up),
+    # shared with the primary Go build.
+    ROOT = Path(__file__).parent.parent
+    STATIC_DIR = ROOT / "static"
+    BASE = ROOT
 
 DB_PATH = BASE / "pings.db"
 CONFIG  = BASE / "config.json"
