@@ -1,0 +1,66 @@
+name: release
+
+# Builds the three release binaries and publishes them as a GitHub Release
+# tagged v1.<build-number> on every push to main that touches the app, and
+# on manual dispatch.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'static/**'
+      - 'Makefile'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to create releases / tags
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: v1.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binaries
+        run: |
+          set -eux
+          mkdir -p dist
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "$LDFLAGS" -o dist/pingchecker-windows-amd64.exe .
+          CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -trimpath -ldflags "$LDFLAGS" -o dist/pingchecker-darwin-arm64 .
+          CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -trimpath -ldflags "$LDFLAGS" -o dist/pingchecker-linux-amd64 .
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eux
+          printf '%s\n' \
+            "Automated release built from the latest \`main\` (\`${GITHUB_SHA:0:7}\`)." \
+            "" \
+            "### Downloads" \
+            "| Platform | File |" \
+            "|----------|------|" \
+            "| Windows (x64) | \`pingchecker-windows-amd64.exe\` |" \
+            "| macOS (Apple Silicon) | \`pingchecker-darwin-arm64\` |" \
+            "| Linux (x64) | \`pingchecker-linux-amd64\` |" \
+            "" \
+            "**macOS / Linux:** \`chmod +x ./pingchecker-*\` then run it." \
+            "On macOS, if Gatekeeper blocks it: \`xattr -d com.apple.quarantine ./pingchecker-darwin-arm64\`" \
+            > dist/NOTES.md
+
+          # Idempotent on re-runs of the same build number.
+          gh release delete "$VERSION" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$VERSION" dist/pingchecker-* \
+            --title "$VERSION" \
+            --notes-file dist/NOTES.md \
+            --latest

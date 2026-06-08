@@ -7,7 +7,10 @@
 
 BINARY  := pingchecker
 DIST    := dist
-LDFLAGS := -s -w
+# Version is derived from git (tag/commit) for local builds; CI overrides it
+# with VERSION=v1.<build-number>.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -s -w -X main.version=$(VERSION)
 # CGO is off so cross-compilation needs no C toolchain (pure-Go SQLite).
 GOFLAGS := CGO_ENABLED=0
 
