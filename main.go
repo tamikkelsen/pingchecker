@@ -43,6 +43,9 @@ var staticFS embed.FS
 
 const addr = "0.0.0.0:8765"
 
+// version is overridden at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
 // ---------------------------------------------------------------------------
 // Paths — data files live next to the binary (overridable via PINGCHECKER_DATA)
 // ---------------------------------------------------------------------------
@@ -1036,7 +1039,7 @@ func main() {
 		log.Fatalf("listen on %s: %v (is another instance running?)", addr, err)
 	}
 
-	fmt.Print("\n  PingChecker running → http://localhost:8765\n\n")
+	fmt.Printf("\n  PingChecker %s running → http://localhost:8765\n\n", version)
 	go func() {
 		time.Sleep(800 * time.Millisecond)
 		openBrowser("http://localhost:8765")
