@@ -1,6 +1,8 @@
 # PingChecker
 
-A lightweight, self-hosted network latency monitor with a real-time web dashboard. Pings any number of hosts every second, stores results in a local SQLite database, and streams live data to the browser over WebSocket.
+A lightweight, self-hosted network latency monitor with a real-time web dashboard. Pings any number of hosts, stores results in a local SQLite database, and streams live data to the browser over WebSocket.
+
+It ships as a **single self-contained binary** — no Python, no runtime, nothing to install. Download the build for your OS, run it, and open the dashboard. The web UI is embedded in the binary; the database (`pings.db`) and config (`config.json`) are created next to it on first launch.
 
 ## Features
 
@@ -17,45 +19,54 @@ A lightweight, self-hosted network latency monitor with a real-time web dashboar
 
 ## Quick Start
 
-### macOS / Linux
+Grab the binary for your platform, then run it:
+
+| Platform | Binary |
+|----------|--------|
+| Windows (x64) | `pingchecker-windows-amd64.exe` |
+| macOS (Apple Silicon) | `pingchecker-darwin-arm64` |
+| Linux (x64) | `pingchecker-linux-amd64` |
+
+**Windows** — double-click `pingchecker-windows-amd64.exe`.
+
+**macOS / Linux:**
+
+```bash
+chmod +x pingchecker-darwin-arm64
+./pingchecker-darwin-arm64
+```
+
+The server starts on `http://localhost:8765` and opens it in your browser. On macOS the first run may be blocked by Gatekeeper — right-click → **Open**, or run `xattr -d com.apple.quarantine ./pingchecker-darwin-arm64`.
+
+## Build from Source
+
+Requires [Go](https://go.dev/dl/) 1.25+. The build uses pure-Go SQLite (`CGO_ENABLED=0`), so cross-compiling needs no C toolchain.
 
 ```bash
 git clone https://github.com/tamikkelsen/pingchecker.git
 cd pingchecker
-chmod +x run.sh
-./run.sh
+
+make run      # run locally
+make build    # build ./pingchecker for this machine
+make cross    # cross-compile all targets into dist/
 ```
 
-The script creates a virtual environment, installs dependencies, starts the server, and opens `http://localhost:8765` in your browser.
-
-### Windows (Python)
-
-```bat
-run.bat
-```
-
-Same behavior as the shell script — requires Python 3.9+ on `PATH`.
-
-### Windows (standalone `.exe`)
-
-Build a single-file executable that requires no Python installation on the target machine:
-
-```bat
-build_windows.bat
-```
-
-Output: `dist\PingChecker.exe` — copy it anywhere and double-click to run. The database (`pings.db`) and config (`config.json`) are created next to the `.exe` on first launch.
-
-## Manual Setup
+`make cross` produces the three binaries above. To build a single target manually:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-python ping_checker.py
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags "-s -w" -o pingchecker.exe .
 ```
 
-Open `http://localhost:8765`.
+## Legacy (Python) Version
+
+The original Python/FastAPI implementation lives in [`legacy/`](legacy/) and still works — it shares the same `static/`, `config.json`, and `pings.db` in the repo root.
+
+```bash
+cd legacy
+./run.sh           # macOS / Linux  (run.bat on Windows)
+```
+
+See [`legacy/`](legacy/) for the PyInstaller build (`build_windows.bat`) as well.
 
 ## Configuration
 
@@ -94,12 +105,14 @@ To override the first-run defaults, add an optional `"settings"` object to `conf
 
 ## Requirements
 
-- Python 3.9+
-- [`fastapi`](https://fastapi.tiangolo.com/) — REST API + WebSocket server
-- [`uvicorn[standard]`](https://www.uvicorn.org/) — ASGI server
-- [`aiosqlite`](https://github.com/omnilib/aiosqlite) — async SQLite access
+**To run:** nothing — the binary is fully self-contained. It shells out to the system `ping` command (present on Windows, macOS, and Linux), so no elevated privileges or raw sockets are needed.
 
-All listed in `requirements.txt`.
+**To build:** [Go](https://go.dev/dl/) 1.25+. Two dependencies, both pure Go:
+
+- [`gorilla/websocket`](https://github.com/gorilla/websocket) — WebSocket server
+- [`modernc.org/sqlite`](https://pkg.go.dev/modernc.org/sqlite) — CGO-free SQLite driver
+
+The dashboard (`static/index.html`) is embedded into the binary at build time via `go:embed`.
 
 ## API Reference
 
@@ -120,7 +133,7 @@ All timestamps are Unix epoch seconds. `start` and `end` default to the last hou
 
 ## Data Storage
 
-Ping results are stored in `pings.db` (SQLite) in the same directory as the script (or next to the `.exe`). The database is created automatically on first run.
+Ping results are stored in `pings.db` (SQLite, WAL mode) next to the binary. The database is created automatically on first run. Set the `PINGCHECKER_DATA` environment variable to store `pings.db` and read `config.json` from a different directory.
 
 Schema:
 

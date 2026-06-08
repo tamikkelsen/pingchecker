@@ -18,8 +18,8 @@ a = Analysis(
     pathex=[],
     binaries=binaries_extra,
     datas=[
-        ('static',      'static'),      # dashboard HTML/JS
-        ('config.json', '.'),           # default host list
+        ('../static',      'static'),   # dashboard HTML/JS (lives in repo root)
+        ('../config.json', '.'),        # default host list (lives in repo root)
     ] + datas_extra,
     hiddenimports=hiddenimports_extra + [
         'anyio._backends._asyncio',
