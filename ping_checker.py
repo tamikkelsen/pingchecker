@@ -8,6 +8,7 @@ import asyncio
 import csv
 import io
 import json
+import math
 import platform
 import re
 import sys
@@ -42,7 +43,16 @@ else:
 
 DB_PATH = BASE / "pings.db"
 CONFIG  = BASE / "config.json"
-PING_INTERVAL = 1  # seconds between rounds
+
+# Runtime-adjustable settings — persisted in the DB, editable from the web UI.
+# The background loop reads these live, so changes take effect without a restart.
+DEFAULT_SETTINGS: Dict[str, int] = {
+    "interval":    1,     # seconds between ping rounds
+    "packet_size": 56,    # ICMP payload size in bytes (0 = OS default)
+    "timeout_ms":  2000,  # per-ping timeout in milliseconds
+    "paused":      0,     # 1 = pause the background ping loop
+}
+SETTINGS: Dict[str, int] = dict(DEFAULT_SETTINGS)
 # ---------------------------------------------------------------------------
 
 
@@ -70,15 +80,26 @@ class _WSManager:
 manager = _WSManager()
 
 
-async def ping_once(host: str) -> Tuple[bool, Optional[float]]:
+async def ping_once(
+    host: str,
+    size: Optional[int] = None,
+    timeout_ms: int = 2000,
+) -> Tuple[bool, Optional[float]]:
     """Ping host once; return (reachable, rtt_ms or None)."""
-    sys = platform.system()
-    if sys == "Windows":
-        cmd = ["ping", "-n", "1", "-w", "2000", host]
-    elif sys == "Darwin":          # -W is milliseconds on macOS
-        cmd = ["ping", "-c", "1", "-W", "2000", host]
-    else:                          # -W is seconds on Linux
-        cmd = ["ping", "-c", "1", "-W", "2", host]
+    system = platform.system()
+    if system == "Windows":
+        cmd = ["ping", "-n", "1", "-w", str(timeout_ms)]
+        if size and size > 0:
+            cmd += ["-l", str(size)]          # -l sets the payload size on Windows
+    elif system == "Darwin":                  # -W is milliseconds on macOS
+        cmd = ["ping", "-c", "1", "-W", str(timeout_ms)]
+        if size and size > 0:
+            cmd += ["-s", str(size)]          # -s sets the payload size
+    else:                                     # -W is seconds on Linux
+        cmd = ["ping", "-c", "1", "-W", str(max(1, math.ceil(timeout_ms / 1000)))]
+        if size and size > 0:
+            cmd += ["-s", str(size)]
+    cmd.append(host)
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -86,7 +107,9 @@ async def ping_once(host: str) -> Tuple[bool, Optional[float]]:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5.0)
+        stdout, _ = await asyncio.wait_for(
+            proc.communicate(), timeout=timeout_ms / 1000 + 3.0
+        )
         text = stdout.decode(errors="replace")
         if proc.returncode == 0:
             m = re.search(r"time[=<](\d+\.?\d*)\s*ms", text)
@@ -117,6 +140,10 @@ async def init_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_pt ON pings(host, timestamp);
             CREATE INDEX IF NOT EXISTS idx_t  ON pings(timestamp);
+            CREATE TABLE IF NOT EXISTS settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
         """)
         await db.commit()
 
@@ -143,12 +170,72 @@ async def seed_hosts() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Settings (DB-backed, edited live from the UI)
+# ---------------------------------------------------------------------------
+
+def _coerce_settings(data: Dict) -> Dict[str, int]:
+    """Clamp/validate incoming settings; silently drop unknown or bad keys."""
+    out: Dict[str, int] = {}
+    if "interval" in data:
+        out["interval"] = max(1, min(3600, int(data["interval"])))
+    if "packet_size" in data:
+        out["packet_size"] = max(0, min(65500, int(data["packet_size"])))
+    if "timeout_ms" in data:
+        out["timeout_ms"] = max(100, min(60000, int(data["timeout_ms"])))
+    if "paused" in data:
+        out["paused"] = 1 if data["paused"] else 0
+    return out
+
+
+async def persist_settings() -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.executemany(
+            "INSERT OR REPLACE INTO settings (key,value) VALUES (?,?)",
+            [(k, str(v)) for k, v in SETTINGS.items()],
+        )
+        await db.commit()
+
+
+async def load_settings() -> None:
+    """Populate SETTINGS from defaults ← config.json ← persisted DB rows."""
+    merged = dict(DEFAULT_SETTINGS)
+
+    if CONFIG.exists():
+        try:
+            cfg = json.loads(CONFIG.read_text())
+            merged.update(_coerce_settings(cfg.get("settings", {})))
+        except Exception:
+            pass
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT key,value FROM settings") as cur:
+            rows = {r[0]: r[1] async for r in cur}
+    for k in DEFAULT_SETTINGS:
+        if k in rows:
+            try:
+                merged[k] = int(rows[k])
+            except ValueError:
+                pass
+
+    SETTINGS.update(merged)
+    await persist_settings()
+
+
+# ---------------------------------------------------------------------------
 # Background ping loop
 # ---------------------------------------------------------------------------
 
 async def ping_loop() -> None:
     while True:
         t0 = time.monotonic()
+
+        if SETTINGS["paused"]:
+            await asyncio.sleep(0.25)         # idle — re-check the pause flag often
+            continue
+
+        interval   = SETTINGS["interval"]
+        size       = SETTINGS["packet_size"]
+        timeout_ms = SETTINGS["timeout_ms"]
 
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute("SELECT host FROM hosts") as cur:
@@ -157,7 +244,9 @@ async def ping_loop() -> None:
         if hosts:
             ts: int = int(time.time())
             results: List[Tuple[bool, Optional[float]]] = list(
-                await asyncio.gather(*[ping_once(h) for h in hosts])
+                await asyncio.gather(
+                    *[ping_once(h, size=size, timeout_ms=timeout_ms) for h in hosts]
+                )
             )
             async with aiosqlite.connect(DB_PATH) as db:
                 await db.executemany(
@@ -172,7 +261,7 @@ async def ping_loop() -> None:
                 "data": {h: {"ok": s, "ms": ms} for h, (s, ms) in zip(hosts, results)},
             })
 
-        await asyncio.sleep(max(0.1, PING_INTERVAL - (time.monotonic() - t0)))
+        await asyncio.sleep(max(0.1, interval - (time.monotonic() - t0)))
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +274,7 @@ async def lifespan(app: FastAPI):
         STATIC_DIR.mkdir(exist_ok=True)
     await init_db()
     await seed_hosts()
+    await load_settings()
     task = asyncio.create_task(ping_loop())
     # Auto-open browser when running as a compiled exe
     if _FROZEN:
@@ -210,6 +300,34 @@ app = FastAPI(title="PingChecker", lifespan=lifespan)
 class HostIn(BaseModel):
     host:  str
     label: Optional[str] = None
+
+
+class SettingsIn(BaseModel):
+    interval:    Optional[int]  = None
+    packet_size: Optional[int]  = None
+    timeout_ms:  Optional[int]  = None
+    paused:      Optional[bool] = None
+
+
+@app.get("/api/settings")
+async def api_get_settings():
+    return dict(SETTINGS)
+
+
+@app.put("/api/settings")
+async def api_put_settings(body: SettingsIn):
+    raw: Dict = {}
+    if body.interval    is not None: raw["interval"]    = body.interval
+    if body.packet_size is not None: raw["packet_size"] = body.packet_size
+    if body.timeout_ms  is not None: raw["timeout_ms"]  = body.timeout_ms
+    if body.paused      is not None: raw["paused"]      = body.paused
+
+    updates = _coerce_settings(raw)
+    if updates:
+        SETTINGS.update(updates)
+        await persist_settings()
+        await manager.broadcast({"type": "settings", "settings": dict(SETTINGS)})
+    return dict(SETTINGS)
 
 
 @app.get("/api/hosts")
@@ -402,6 +520,7 @@ async def ws_endpoint(ws: WebSocket):
             hosts = [{"host": r[0], "label": r[1]} async for r in cur]
     try:
         await ws.send_json({"type": "hosts", "hosts": hosts})
+        await ws.send_json({"type": "settings", "settings": dict(SETTINGS)})
         while True:
             await ws.receive_text()   # keeps connection open; detects disconnect
     except WebSocketDisconnect:

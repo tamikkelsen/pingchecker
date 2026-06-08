@@ -303,6 +303,110 @@
       font-size: 13px;
     }
     #drop-count { font-size: 11px; }
+
+    /* ---- Header controls ---- */
+    .hdr-actions { display: flex; align-items: center; gap: 8px; }
+    .hdr-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 12px;
+      padding: 5px 11px;
+      transition: background 0.1s, border-color 0.1s, color 0.1s;
+      white-space: nowrap;
+    }
+    .hdr-btn:hover { background: var(--border); }
+    .hdr-btn.active { border-color: var(--accent); color: var(--accent); }
+    .hdr-btn.paused { border-color: var(--orange); color: var(--orange); }
+
+    /* ---- Per-host stats ---- */
+    .host-stats {
+      display: block;
+      font-size: 10px;
+      line-height: 1.4;
+      color: var(--dim);
+      font-family: monospace;
+      margin-top: 2px;
+    }
+    .host-stats .loss-bad { color: var(--orange); }
+
+    /* ---- Settings modal ---- */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      width: 380px;
+      max-width: calc(100vw - 32px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+    .modal-header h2 { font-size: 15px; font-weight: 600; }
+    .modal-close {
+      background: none; border: none; color: var(--dim);
+      cursor: pointer; font-size: 20px; line-height: 1;
+    }
+    .modal-close:hover { color: var(--text); }
+    .modal-body { padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field label { font-size: 13px; font-weight: 500; }
+    .field .hint { font-size: 11px; color: var(--dim); }
+    .field input {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 7px 10px;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .field input:focus { border-color: var(--accent); }
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 14px 18px;
+      border-top: 1px solid var(--border);
+    }
+    .btn-secondary {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      cursor: pointer;
+      padding: 7px 16px;
+      font-size: 13px;
+    }
+    .btn-secondary:hover { background: var(--border); }
+    .btn-primary {
+      background: var(--accent);
+      border: none;
+      border-radius: 6px;
+      color: #000;
+      cursor: pointer;
+      padding: 7px 16px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .btn-primary:hover { opacity: 0.85; }
   </style>
 </head>
 <body>
@@ -312,11 +416,47 @@
     <h1>PingChecker</h1>
     <span class="badge" id="interval-badge">1 s intervals</span>
   </div>
-  <div class="conn-pill">
-    <span class="dot unknown" id="conn-dot"></span>
-    <span id="conn-text">Connecting…</span>
+  <div class="hdr-actions">
+    <button class="hdr-btn" id="alerts-btn" title="Desktop + sound alert when a host drops">🔔 Alerts: Off</button>
+    <button class="hdr-btn" id="pause-btn">⏸ Pause</button>
+    <button class="hdr-btn" id="settings-btn">⚙ Settings</button>
+    <div class="conn-pill">
+      <span class="dot unknown" id="conn-dot"></span>
+      <span id="conn-text">Connecting…</span>
+    </div>
   </div>
 </header>
+
+<!-- Settings modal -->
+<div class="modal-backdrop" id="settings-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Settings</h2>
+      <button class="modal-close" id="settings-cancel" title="Close">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label for="set-interval">Ping interval</label>
+        <input id="set-interval" type="number" min="1" max="3600" step="1">
+        <span class="hint">Seconds between ping rounds (1–3600).</span>
+      </div>
+      <div class="field">
+        <label for="set-packet">Packet size</label>
+        <input id="set-packet" type="number" min="0" max="65500" step="1">
+        <span class="hint">ICMP payload bytes (0 = OS default, max 65500).</span>
+      </div>
+      <div class="field">
+        <label for="set-timeout">Timeout</label>
+        <input id="set-timeout" type="number" min="100" max="60000" step="100">
+        <span class="hint">Per-ping timeout in milliseconds (100–60000).</span>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" id="settings-cancel2">Cancel</button>
+      <button class="btn-primary" id="settings-save">Save</button>
+    </div>
+  </div>
+</div>
 
 <div class="layout">
   <!-- Sidebar -->
@@ -418,6 +558,9 @@ let hostStatus = {};          // host -> {ok, ms}
 let liveData   = {};          // host -> [{x (ms), y (ms|null)}]
 let wsRef      = null;
 let selectedMinutes = 60;
+let settings   = { interval: 1, packet_size: 56, timeout_ms: 2000, paused: 0 };
+let alertsEnabled = localStorage.getItem('pc-alerts') === '1';
+let lastAlertTs   = 0;        // throttle desktop/sound alerts
 
 // ---------------------------------------------------------------------------
 // Chart setup  (factory fn — structuredClone can't handle functions)
@@ -497,8 +640,127 @@ function connectWS() {
   ws.onmessage = e => {
     const msg = JSON.parse(e.data);
     // 'hosts' message ignored — we load via REST; only use WS for live pings
-    if (msg.type === 'ping') onPing(msg.ts, msg.data);
+    if (msg.type === 'ping')          onPing(msg.ts, msg.data);
+    else if (msg.type === 'settings') applySettings(msg.settings);
   };
+}
+
+// ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+function applySettings(s) {
+  settings = { ...settings, ...s };
+
+  const iv = settings.interval;
+  document.getElementById('interval-badge').textContent = `${iv} s interval${iv === 1 ? '' : 's'}`;
+
+  const pauseBtn = document.getElementById('pause-btn');
+  if (settings.paused) {
+    pauseBtn.textContent = '▶ Resume';
+    pauseBtn.classList.add('paused');
+  } else {
+    pauseBtn.textContent = '⏸ Pause';
+    pauseBtn.classList.remove('paused');
+  }
+
+  // Keep the (possibly closed) form in sync with the live values
+  document.getElementById('set-interval').value = settings.interval;
+  document.getElementById('set-packet').value   = settings.packet_size;
+  document.getElementById('set-timeout').value  = settings.timeout_ms;
+}
+
+async function saveSettings() {
+  const payload = {
+    interval:    parseInt(document.getElementById('set-interval').value, 10),
+    packet_size: parseInt(document.getElementById('set-packet').value,   10),
+    timeout_ms:  parseInt(document.getElementById('set-timeout').value,  10),
+  };
+  try {
+    const s = await fetch('/api/settings', {
+      method:  'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload),
+    }).then(r => r.json());
+    applySettings(s);
+    closeSettings();
+  } catch {
+    alert('Cannot reach server — is ping_checker.py running?');
+  }
+}
+
+function openSettings()  { applySettings(settings); document.getElementById('settings-modal').classList.add('open'); }
+function closeSettings() { document.getElementById('settings-modal').classList.remove('open'); }
+
+async function togglePause() {
+  try {
+    const s = await fetch('/api/settings', {
+      method:  'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ paused: !settings.paused }),
+    }).then(r => r.json());
+    applySettings(s);
+  } catch {
+    alert('Cannot reach server — is ping_checker.py running?');
+  }
+}
+
+document.getElementById('settings-btn').addEventListener('click', openSettings);
+document.getElementById('settings-cancel').addEventListener('click', closeSettings);
+document.getElementById('settings-cancel2').addEventListener('click', closeSettings);
+document.getElementById('settings-save').addEventListener('click', saveSettings);
+document.getElementById('settings-modal').addEventListener('click', e => {
+  if (e.target.id === 'settings-modal') closeSettings();   // click backdrop to close
+});
+document.getElementById('pause-btn').addEventListener('click', togglePause);
+
+// ---------------------------------------------------------------------------
+// Drop alerts (desktop notification + WebAudio beep)
+// ---------------------------------------------------------------------------
+function renderAlertsBtn() {
+  const btn = document.getElementById('alerts-btn');
+  btn.textContent = `🔔 Alerts: ${alertsEnabled ? 'On' : 'Off'}`;
+  btn.classList.toggle('active', alertsEnabled);
+}
+
+document.getElementById('alerts-btn').addEventListener('click', async () => {
+  alertsEnabled = !alertsEnabled;
+  localStorage.setItem('pc-alerts', alertsEnabled ? '1' : '0');
+  if (alertsEnabled && 'Notification' in window && Notification.permission === 'default') {
+    try { await Notification.requestPermission(); } catch {}
+  }
+  renderAlertsBtn();
+});
+
+function beep() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 660;
+    gain.gain.setValueAtTime(0.001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.42);
+    osc.onended = () => ctx.close();
+  } catch {}
+}
+
+function notifyDrop(failed) {
+  const now = Date.now();
+  if (now - lastAlertTs < 4000) return;   // throttle bursts
+  lastAlertTs = now;
+
+  beep();
+  const names = failed.map(h => (hosts.find(x => x.host === h)?.label) || h);
+  const body  = `${names.join(', ')} stopped responding`;
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try { new Notification('PingChecker — host down', { body }); } catch {}
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -523,6 +785,41 @@ async function initHosts(newHosts) {
   loadHistory();
 }
 
+// Rolling stats over the live window: avg / min / max / jitter / packet loss
+function hostStats(host) {
+  const pts = liveData[host] || [];
+  const total = pts.length;
+  if (total === 0) return null;
+  const vals = [];
+  for (const p of pts) if (p.y != null) vals.push(p.y);
+  const loss = ((total - vals.length) / total) * 100;
+  if (vals.length === 0) return { loss, avg: null, min: null, max: null, jit: null };
+  let sum = 0, min = Infinity, max = -Infinity;
+  for (const v of vals) { sum += v; if (v < min) min = v; if (v > max) max = v; }
+  let jsum = 0;
+  for (let i = 1; i < vals.length; i++) jsum += Math.abs(vals[i] - vals[i - 1]);
+  return {
+    loss,
+    avg: sum / vals.length,
+    min, max,
+    jit: vals.length > 1 ? jsum / (vals.length - 1) : 0,
+  };
+}
+
+function fmtMs(v) {
+  if (v == null) return '–';
+  return v < 10 ? v.toFixed(1) : String(Math.round(v));
+}
+
+function statsLine(host) {
+  const s = hostStats(host);
+  if (!s) return '';
+  const lossCls = s.loss > 0 ? 'loss-bad' : '';
+  const lossTxt = `<span class="${lossCls}">${s.loss < 1 && s.loss > 0 ? s.loss.toFixed(1) : Math.round(s.loss)}% loss</span>`;
+  if (s.avg == null) return `<span class="host-stats">${lossTxt}</span>`;
+  return `<span class="host-stats">${lossTxt} · avg ${fmtMs(s.avg)} · ${fmtMs(s.min)}/${fmtMs(s.max)} · jit ${fmtMs(s.jit)}</span>`;
+}
+
 function renderHostList() {
   const ul = document.getElementById('host-list');
   ul.innerHTML = '';
@@ -541,6 +838,7 @@ function renderHostList() {
       <div class="host-info">
         <span class="host-label">${esc(label)}</span>
         <span class="host-addr">${esc(host)}</span>
+        ${statsLine(host)}
       </div>
       <span class="host-ms ${msClass}">${msText}</span>
       <button class="btn-remove" title="Remove" data-host="${esc(host)}">×</button>
@@ -612,8 +910,11 @@ document.getElementById('add-form').addEventListener('submit', async e => {
 function onPing(ts, data) {
   const x      = ts * 1000;
   const cutoff = x - LIVE_WINDOW_MS;
+  const newlyDown = [];
 
   for (const [host, result] of Object.entries(data)) {
+    const prev = hostStatus[host];
+    if (prev && prev.ok === true && result.ok === false) newlyDown.push(host);
     hostStatus[host] = { ok: result.ok, ms: result.ms };
     if (!liveData[host]) liveData[host] = [];
     liveData[host].push({ x, y: result.ok ? result.ms : null });
@@ -625,6 +926,7 @@ function onPing(ts, data) {
   renderHostList();
   updateLiveChart();
 
+  if (alertsEnabled && newlyDown.length) notifyDrop(newlyDown);
   if (Object.values(data).some(r => !r.ok)) refreshDrops();
 }
 
@@ -784,7 +1086,12 @@ function fmtTime(ts) {
 // Boot — load hosts via REST immediately; WS is for live pings only
 // ---------------------------------------------------------------------------
 async function boot() {
+  renderAlertsBtn();
   connectWS();
+  try {
+    const s = await fetch('/api/settings').then(r => r.json());
+    applySettings(s);
+  } catch { /* WS will deliver settings shortly */ }
   try {
     const hostList = await fetch('/api/hosts').then(r => r.json());
     await initHosts(hostList);
