@@ -1,5 +1,9 @@
 # PingChecker
 
+[![Release](https://img.shields.io/github/v/release/tamikkelsen/pingchecker?display_name=tag&sort=semver&label=release)](https://github.com/tamikkelsen/pingchecker/releases/latest)
+[![Build](https://github.com/tamikkelsen/pingchecker/actions/workflows/release.yml/badge.svg)](https://github.com/tamikkelsen/pingchecker/actions/workflows/release.yml)
+[![Downloads](https://img.shields.io/github/downloads/tamikkelsen/pingchecker/total?label=downloads)](https://github.com/tamikkelsen/pingchecker/releases)
+
 A lightweight, self-hosted network latency monitor with a real-time web dashboard. Pings any number of hosts, stores results in a local SQLite database, and streams live data to the browser over WebSocket.
 
 It ships as a **single self-contained binary** — no Python, no runtime, nothing to install. Download the build for your OS, run it, and open the dashboard. The web UI is embedded in the binary; the database (`pings.db`) and config (`config.json`) are created next to it on first launch.
