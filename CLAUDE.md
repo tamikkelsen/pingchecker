@@ -34,8 +34,9 @@ Almost all Go logic lives in **`main.go`** (single `package main` file, ~1000 li
 
 - **One background ping goroutine** (`pingLoop`) reads the host list from the DB each round, pings all hosts concurrently (one goroutine each, joined with a `WaitGroup`), writes a batch insert in a single transaction, then broadcasts results. Sleep is `interval - elapsed`, floored at 100ms. Honors the `paused` setting.
 - **Pinging shells out to the system `ping`** (`pingOnce`) — no raw sockets, no root. Args are OS-specific (`runtime.GOOS` switch for windows/darwin/linux: timeout flags and payload-size flags differ); latency is scraped from stdout with `timeRe`. This is why behavior depends on the host OS's `ping` binary.
-- **WebSocket hub** (`hub`, global `H`) does buffered fan-out: each client has a `send` channel and a dedicated writer goroutine; the broadcast loop drops a frame for any client whose buffer is full rather than blocking the ping loop. `CheckOrigin` returns true (open by design).
+- **WebSocket hub** (`hub`, global `H`) does buffered fan-out: each client has a `send` channel and a dedicated writer goroutine; the broadcast loop drops a frame for any client whose buffer is full rather than blocking the ping loop.
 - **SQLite** is opened with `SetMaxOpenConns(1)` (single writer, serializes read/write to avoid "database is locked") in WAL mode. The pure-Go `modernc.org/sqlite` driver keeps CGO off so cross-compiles need no C toolchain.
+- **Access control** (`guard` middleware wrapping the whole mux): binds `127.0.0.1` only; validates the `Host` header (anti-DNS-rebinding) and `Origin` (anti-CSRF) on every request; and requires a bearer token on `/api/*` + `/ws`. The token (`apiToken`) is generated on first run and persisted to `pings_token.txt`; the browser receives it as a `SameSite=Strict` `HttpOnly` cookie set by `handleIndex`, while curl/scripts use `Authorization: Bearer` or `?token=`. Token compare is constant-time. The index page and `/static/` are intentionally token-exempt so the page can load and set the cookie.
 
 ### Settings precedence
 
@@ -43,7 +44,7 @@ Runtime settings (`interval`, `packet_size`, `timeout_ms`, `paused`) are resolve
 
 ### Data location
 
-`dataDir()` resolves where `pings.db` and `config.json` live: `PINGCHECKER_DATA` env var if set, else the binary's own directory (but **not** when running under `go run`, which builds into a `go-build` temp dir — it falls back to CWD so dev data isn't scattered). `pings.db` (and its `-wal`/`-shm`) are gitignored runtime data.
+`dataDir()` resolves where `pings.db`, `config.json`, and `pings_token.txt` live: `PINGCHECKER_DATA` env var if set, else the binary's own directory (but **not** when running under `go run`, which builds into a `go-build` temp dir — it falls back to CWD so dev data isn't scattered). `pings.db` (and its `-wal`/`-shm`) and `pings_token.txt` are gitignored runtime data.
 
 ## Versioning & releases
 
