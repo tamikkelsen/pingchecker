@@ -147,6 +147,13 @@ pings    (id INTEGER, host TEXT, timestamp INTEGER, success INTEGER, latency_ms 
 settings (key TEXT PRIMARY KEY, value TEXT)
 ```
 
+## Credits
+
+Created by **Tommy Mikkelsen** in collaboration with **Claude** (Anthropic's [Claude Code](https://claude.com/claude-code)).
+
 ## License
 
-MIT
+Released under the [MIT License](LICENSE) — © 2026 Tommy Mikkelsen.
+
+The compiled binary bundles several permissive (MIT / BSD) Go dependencies; their
+copyright notices and license texts are reproduced in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).

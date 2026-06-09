@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Tommy Mikkelsen
+# Developed by Tommy Mikkelsen in collaboration with Claude (Anthropic's Claude Code).
+# Licensed under the MIT License; see the LICENSE file in the repo root.
+#
 # PingChecker — multi-host latency monitor
 # Setup:  pip install -r requirements.txt
 # Run:    python ping_checker.py
@@ -542,4 +547,6 @@ async def root():
 
 if __name__ == "__main__":
     print("\n  PingChecker running → http://localhost:8765\n")
-    uvicorn.run(app, host="0.0.0.0", port=8765, reload=False)
+    # Loopback only — the API/WebSocket are unauthenticated. Use "0.0.0.0" only
+    # to deliberately expose it on a trusted LAN.
+    uvicorn.run(app, host="127.0.0.1", port=8765, reload=False)

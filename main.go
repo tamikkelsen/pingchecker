@@ -1,3 +1,8 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Tommy Mikkelsen
+// Developed by Tommy Mikkelsen in collaboration with Claude (Anthropic's Claude Code).
+// Licensed under the MIT License; see the LICENSE file for details.
+
 // PingChecker — multi-host latency monitor (Go edition).
 //
 // A single self-contained binary: no runtime dependencies, embeds the web
@@ -41,7 +46,10 @@ import (
 //go:embed static
 var staticFS embed.FS
 
-const addr = "0.0.0.0:8765"
+// Bind to loopback only: the API and WebSocket are unauthenticated, so the
+// server is restricted to the local machine. Change to "0.0.0.0:8765" only if
+// you intend to expose it on a trusted LAN.
+const addr = "127.0.0.1:8765"
 
 // version is overridden at build time via -ldflags "-X main.version=...".
 var version = "dev"
@@ -609,22 +617,30 @@ func handleAddHost(w http.ResponseWriter, r *http.Request) {
 		Host  string  `json:"host"`
 		Label *string `json:"label"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Host) == "" {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "Invalid host"})
 		return
 	}
-	label := body.Host
+	host := strings.TrimSpace(body.Host)
+	// Reject empty hosts and values starting with "-": host is passed as an
+	// argument to the system `ping`, and a leading dash would be parsed as a
+	// flag (argument injection). Valid hostnames/IPs never begin with "-".
+	if host == "" || strings.HasPrefix(host, "-") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "Invalid host"})
+		return
+	}
+	label := host
 	if body.Label != nil && *body.Label != "" {
 		label = *body.Label
 	}
 	_, err := db.ExecContext(r.Context(),
 		"INSERT INTO hosts (host,label,added_at) VALUES (?,?,?)",
-		body.Host, label, time.Now().Unix())
+		host, label, time.Now().Unix())
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"detail": "Host already exists"})
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"host": body.Host, "label": label})
+	writeJSON(w, http.StatusCreated, map[string]string{"host": host, "label": label})
 }
 
 func handleDeleteHost(w http.ResponseWriter, r *http.Request) {
