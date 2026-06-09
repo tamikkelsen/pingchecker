@@ -16,9 +16,12 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
 	"database/sql"
 	"embed"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +29,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -76,8 +80,101 @@ func dataDir() string {
 var (
 	dbPath     string
 	configPath string
+	tokenPath  string
 	db         *sql.DB
 )
+
+// ---------------------------------------------------------------------------
+// Access control — loopback Host/Origin checks + bearer-token auth
+// ---------------------------------------------------------------------------
+
+// apiToken gates the REST API and WebSocket. It is generated on first run and
+// persisted next to the database so curl/scripts keep working across restarts.
+var apiToken string
+
+func loadOrCreateToken() error {
+	if b, err := os.ReadFile(tokenPath); err == nil {
+		if t := strings.TrimSpace(string(b)); t != "" {
+			apiToken = t
+			return nil
+		}
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return err
+	}
+	apiToken = hex.EncodeToString(buf)
+	return os.WriteFile(tokenPath, []byte(apiToken+"\n"), 0o600)
+}
+
+// hostAllowed rejects Host headers other than loopback, defeating DNS-rebinding
+// attacks that resolve an attacker hostname to 127.0.0.1.
+func hostAllowed(hostHeader string) bool {
+	h := hostHeader
+	if hh, _, err := net.SplitHostPort(hostHeader); err == nil {
+		h = hh
+	}
+	switch h {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
+}
+
+// originAllowed rejects cross-site browser requests. A missing Origin (curl,
+// same-origin GET navigations) is allowed; browsers always set Origin on
+// cross-origin and WebSocket requests, so a foreign site cannot forge it.
+func originAllowed(origin string) bool {
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	switch u.Hostname() {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
+}
+
+// tokenValid checks the bearer token from the Authorization header, the
+// pc_token cookie (set when the dashboard loads), or a token query param
+// (for WebSocket clients that cannot set headers).
+func tokenValid(r *http.Request) bool {
+	var presented string
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		presented = strings.TrimPrefix(h, "Bearer ")
+	} else if c, err := r.Cookie("pc_token"); err == nil {
+		presented = c.Value
+	} else {
+		presented = r.URL.Query().Get("token")
+	}
+	return presented != "" &&
+		subtle.ConstantTimeCompare([]byte(presented), []byte(apiToken)) == 1
+}
+
+// guard wraps the whole mux: every request must carry an allowed Host and
+// Origin; the API and WebSocket additionally require the token. The index page
+// and static assets stay public so the browser can load them and receive the
+// auth cookie.
+func guard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !hostAllowed(r.Host) || !originAllowed(r.Header.Get("Origin")) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/ws" {
+			if !tokenValid(r) {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 // ---------------------------------------------------------------------------
 // Settings — runtime-adjustable, persisted in the DB, edited live from the UI
@@ -393,7 +490,7 @@ type pingResult struct {
 // ---------------------------------------------------------------------------
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true }, // match the Python server's openness
+	CheckOrigin: func(r *http.Request) bool { return originAllowed(r.Header.Get("Origin")) },
 }
 
 type client struct {
@@ -980,6 +1077,16 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "index not found", http.StatusInternalServerError)
 		return
 	}
+	// Hand the dashboard its credential. SameSite=Strict stops the browser from
+	// sending it on cross-site requests (CSRF defense); the page's same-origin
+	// fetch and WebSocket calls include it automatically.
+	http.SetCookie(w, &http.Cookie{
+		Name:     "pc_token",
+		Value:    apiToken,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(data)
 }
@@ -1010,6 +1117,11 @@ func main() {
 	dir := dataDir()
 	dbPath = filepath.Join(dir, "pings.db")
 	configPath = filepath.Join(dir, "config.json")
+	tokenPath = filepath.Join(dir, "pings_token.txt")
+
+	if err := loadOrCreateToken(); err != nil {
+		log.Fatalf("init token: %v", err)
+	}
 
 	if err := openDB(); err != nil {
 		log.Fatalf("open db: %v", err)
@@ -1045,7 +1157,7 @@ func main() {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(sub))))
 	mux.HandleFunc("GET /{$}", handleIndex)
 
-	srv := &http.Server{Addr: addr, Handler: mux}
+	srv := &http.Server{Addr: addr, Handler: guard(mux)}
 
 	go pingLoop(ctx)
 
@@ -1055,7 +1167,8 @@ func main() {
 		log.Fatalf("listen on %s: %v (is another instance running?)", addr, err)
 	}
 
-	fmt.Printf("\n  PingChecker %s running → http://localhost:8765\n\n", version)
+	fmt.Printf("\n  PingChecker %s running → http://localhost:8765\n", version)
+	fmt.Printf("  API token: %s\n  (saved to %s — needed for curl/scripts; the browser is handled automatically)\n\n", apiToken, tokenPath)
 	go func() {
 		time.Sleep(800 * time.Millisecond)
 		openBrowser("http://localhost:8765")

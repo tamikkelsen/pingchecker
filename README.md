@@ -133,11 +133,28 @@ The dashboard (`static/index.html`) is embedded into the binary at build time vi
 | `GET` | `/api/export/drops.csv` | Download drop events as CSV |
 | `WS` | `/ws` | WebSocket — streams live ping results and settings changes |
 
-All timestamps are Unix epoch seconds. `start` and `end` default to the last hour when omitted.
+All timestamps are Unix epoch seconds. `start` and `end` default to the last hour when omitted. All `/api/*` and `/ws` requests require the auth token (see below).
+
+## Security & Access
+
+PingChecker is meant to run on the machine you're using. It is hardened accordingly:
+
+- **Loopback only.** The server binds `127.0.0.1:8765`, so it is not reachable from other machines. To deliberately expose it on a trusted LAN, change `addr` in `main.go` to `0.0.0.0:8765` and rebuild (you then rely on the token for access control).
+- **Bearer token.** A 32-byte random token is generated on first run, printed at startup, and saved to `pings_token.txt` next to the database. Every `/api/*` and `/ws` request must present it. The **browser dashboard works automatically** — loading the page sets a `SameSite=Strict`, `HttpOnly` cookie. For `curl`/scripts, pass the token explicitly:
+
+  ```bash
+  TOKEN=$(cat pings_token.txt)
+  curl -H "Authorization: Bearer $TOKEN" http://localhost:8765/api/hosts
+  # WebSocket clients that can't set headers may use ?token=$TOKEN
+  ```
+
+- **Origin & Host checks.** Cross-site browser requests are rejected (Origin allowlist), and non-loopback `Host` headers are refused to defeat DNS-rebinding attacks.
+
+Delete `pings_token.txt` and restart to rotate the token.
 
 ## Data Storage
 
-Ping results are stored in `pings.db` (SQLite, WAL mode) next to the binary. The database is created automatically on first run. Set the `PINGCHECKER_DATA` environment variable to store `pings.db` and read `config.json` from a different directory.
+Ping results are stored in `pings.db` (SQLite, WAL mode) next to the binary. The database, `config.json`, and `pings_token.txt` all live in the same directory. The database is created automatically on first run. Set the `PINGCHECKER_DATA` environment variable to use a different directory.
 
 Schema:
 

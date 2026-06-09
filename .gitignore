@@ -9,6 +9,9 @@ pings.db
 pings.db-wal
 pings.db-shm
 
+# Generated API token (runtime secret — not tracked)
+pings_token.txt
+
 # Go build output
 /pingchecker
 /pingchecker.exe
